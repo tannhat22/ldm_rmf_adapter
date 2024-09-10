@@ -5,7 +5,7 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from rmf_lift_msgs.msg import LiftState, LiftRequest
 from rmf_door_msgs.msg import DoorState, DoorRequest, DoorMode
-from ldm_fleet_msgs.msg import FleetLiftState, FLiftState, FLiftRequest
+from ldm_fleet_msgs.msg import FleetLiftState, LiftState, LiftRequest
 from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.publisher import Publisher
 
