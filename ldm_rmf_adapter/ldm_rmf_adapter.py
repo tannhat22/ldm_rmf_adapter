@@ -5,11 +5,15 @@ from rclpy.node import Node
 from rclpy.qos import QoSProfile, ReliabilityPolicy, DurabilityPolicy
 from rmf_lift_msgs.msg import LiftState, LiftRequest
 from rmf_door_msgs.msg import DoorState, DoorRequest, DoorMode
-from ldm_fleet_msgs.msg import FleetLiftState, LiftState, LiftRequest
+from ldm_fleet_msgs.msg import (
+    FleetLiftState,
+    LiftState as LDMLiftState,
+    LiftRequest as LDMLiftRequest,
+)
 from rcl_interfaces.msg import ParameterDescriptor
 from rclpy.publisher import Publisher
 
-from . import ldm_client
+from . import ldm_context
 import threading
 from typing import Any
 from abc import ABC, abstractmethod
@@ -19,7 +23,7 @@ import time
 class RmfContext(ABC):
     _logger: Any
 
-    _ldm_context: ldm_client.LdmContext
+    _ldm_context: ldm_context.LdmContext
 
     _is_occupied: bool
     _occupant_id: str
@@ -28,7 +32,7 @@ class RmfContext(ABC):
     # buffer to neglect mutiple same LiftRequest
     _destination_floor: str
 
-    def __init__(self, ldm_context: ldm_client.LdmContext, logger=None) -> None:
+    def __init__(self, ldm_context: ldm_context.LdmContext, logger=None) -> None:
         self._logger = logger
 
         self._ldm_context = ldm_context
@@ -71,10 +75,12 @@ class RmfContext(ABC):
 
 
 class RmfLiftContext(RmfContext):
-    _ldm_context: ldm_client.LdmElevatorContext
+    _ldm_context: ldm_context.LdmElevatorContext
     _rmf_floor_list: list[str]
 
-    def __init__(self, ldm_context: ldm_client.LdmElevatorContext, logger=None) -> None:
+    def __init__(
+        self, ldm_context: ldm_context.LdmElevatorContext, logger=None
+    ) -> None:
         super().__init__(ldm_context, logger)
 
         # convolve door direction into floor_name
@@ -141,9 +147,9 @@ class RmfLiftContext(RmfContext):
 
 
 class RmfDoorContext(RmfContext):
-    _ldm_context: ldm_client.LdmDoorContext
+    _ldm_context: ldm_context.LdmDoorContext
 
-    def __init__(self, ldm_context: ldm_client.LdmDoorContext, logger=None) -> None:
+    def __init__(self, ldm_context: ldm_context.LdmDoorContext, logger=None) -> None:
         super().__init__(ldm_context, logger)
 
     def get_status(self) -> DoorState:
@@ -162,7 +168,7 @@ class RmfDoorContext(RmfContext):
 
 
 class LdmRmfAdapter(Node):
-    _ldm_client: ldm_client.LdmClient
+    _ldm_client: ldm_context.LdmClient
 
     _lift_context_dict: dict[str, RmfLiftContext]
     _door_context_dict: dict[str, RmfDoorContext]
@@ -196,7 +202,7 @@ class LdmRmfAdapter(Node):
 
         self.get_logger().info(f'Use "{server_config_file}" and "{cert_dir}"')
 
-        self._ldm_client = ldm_client.LdmClient(self.get_logger())
+        self._ldm_client = ldm_context.LdmClient(self.get_logger())
         self._ldm_client.initialize(server_config_file, cert_dir)
 
         ldm_context_dict = self._ldm_client.get_contexts()
@@ -206,11 +212,11 @@ class LdmRmfAdapter(Node):
 
         for name, l_context in ldm_context_dict.items():
             match l_context.get_device_type():
-                case ldm_client.DeviceType.ELEVATOR:
+                case ldm_context.DeviceType.ELEVATOR:
                     self._lift_context_dict.update(
                         {name: RmfLiftContext(l_context, self.get_logger())}
                     )
-                case ldm_client.DeviceType.DOOR:
+                case ldm_context.DeviceType.DOOR:
                     self._door_context_dict.update(
                         {name: RmfDoorContext(l_context, self.get_logger())}
                     )
@@ -241,8 +247,8 @@ class LdmRmfAdapter(Node):
         )
 
         # To publish lift request to Fleet Lift Server
-        self._flift_request_pub = self.create_publisher(
-            FLiftRequest, "flift_requests", qos_profile=state_qos_profile
+        self._ldm_lift_request_pub = self.create_publisher(
+            LDMLiftRequest, "lift_ldm_requests", qos_profile=state_qos_profile
         )
 
         # Subscribe lift requests from RMF
@@ -277,7 +283,7 @@ class LdmRmfAdapter(Node):
         # To send RequestElevatorStatus and RequestDoorStatus to LCI every 3 seconds when registered.
         self._sync_ldm_status_timer = self.create_timer(3.0, self._sync_ldm_status)
 
-    def _publish_rmf_states(self):
+    def _publish_rmf_states(self, msgs: FleetLiftState):
         current_time = self.get_clock().now().to_msg()
         is_connected = self._ldm_client._mqtt_client.is_connected()
 
@@ -399,7 +405,7 @@ class LdmRmfAdapter(Node):
                     # 2nd CallElevator when the robot may be in the cage.
 
                     res = self._ldm_client.do_robot_status(
-                        rl_context._ldm_context, ldm_client.RobotStatus.HAS_ENTERED
+                        rl_context._ldm_context, ldm_context.RobotStatus.HAS_ENTERED
                     )
 
                     if not res:
@@ -435,7 +441,7 @@ class LdmRmfAdapter(Node):
                     else:
                         destination_door = 1
 
-                res = self._ldm_client.do_call_elevator(
+                res = self._ldm_client(
                     rl_context._ldm_context,
                     origination,
                     destination,
@@ -457,7 +463,7 @@ class LdmRmfAdapter(Node):
             # RMF Lift API does not have information where the robot is. Then, HAS_GOT_OFF used for LCI to reset.
             # For resetting, no need to receive the corresponding response from LCI
             self._ldm_client.do_robot_status(
-                rl_context._ldm_context, ldm_client.RobotStatus.HAS_GOT_OFF, False
+                rl_context._ldm_context, ldm_context.RobotStatus.HAS_GOT_OFF, False
             )
             time.sleep(1)
 
@@ -507,7 +513,7 @@ class LdmRmfAdapter(Node):
         self._ldm_client.do_release(rd_context._ldm_context, False)
         rd_context.reset()
 
-    def _fleet_lift_state_callback(self, lifts_state: FleetLiftState):
+    def _fleet_lift_state_callback(self, lift_states: FleetLiftState):
         pass
 
 

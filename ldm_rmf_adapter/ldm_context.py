@@ -1,14 +1,16 @@
 # Copyright (c) 2024- Octa Robotics, Inc. All Rights Reserved.
 
-import paho.mqtt.client as mqtt
-import time
+# import paho.mqtt.client as mqtt
+# import time
 import ruamel.yaml
-import json
-import sys
+
+# import json
+# import sys
 import logging
 from enum import IntEnum, Enum
-import glob
-import ssl
+
+# import glob
+# import ssl
 import threading
 
 from abc import ABC, abstractmethod
@@ -53,7 +55,7 @@ class LdmFloorInfo:
 
 class LdmContext(ABC):
     """
-    Context class for LCI to support multiple elevators and doors with a single Robot Account.
+    Context class for LDM to support multiple elevators and doors with a single Robot Account.
     """
 
     _logger: Any
@@ -65,7 +67,7 @@ class LdmContext(ABC):
     _context_lock: threading.RLock
 
     # Event to wait sychronous API response
-    _response_event: threading.Event
+    # _response_event: threading.Event
 
     reset_callback: Callable[[], None]
 
@@ -79,7 +81,7 @@ class LdmContext(ABC):
 
         self._context_lock = threading.RLock()
 
-        self._response_event = threading.Event()
+        # self._response_event = threading.Event()
 
         self.reset_callback = None
 
@@ -105,8 +107,6 @@ class LdmContext(ABC):
 
 
 class LdmElevatorContext(LdmContext):
-    _bldg_id: str
-    _bank_id: str
     _elevator_id: str
     _floor_list: list[LdmFloorInfo]
 
@@ -125,23 +125,19 @@ class LdmElevatorContext(LdmContext):
         self._bldg_id = bldg_id
 
     def initialize(self, config: dict) -> bool:
-        self._bank_id = config.get("ldm_bank_id", None)
         self._elevator_id = config.get("ldm_elevator_id", None)
         floor_list_tmp = config.get("ldm_floor_list", None)
 
         ret = True
-        if self._bank_id == None:
-            self._logger.error("[LCI] <ldm_bank_id> is not specified.")
-            ret = False
 
         if self._elevator_id == None:
-            self._logger.error("[LCI] <ldm_elevator_id> is not specified. Use 0.")
+            self._logger.error("[LDM] <ldm_elevator_id> is not specified. Use 0.")
             self._elevator_id = 0
         else:
             self._elevator_id = str(self._elevator_id)
 
         if type(floor_list_tmp) is not ruamel.yaml.comments.CommentedSeq:
-            self._logger.error("[LCI] <ldm_floor_list> is not a list.")
+            self._logger.error("[LDM] <ldm_floor_list> is not a list.")
             ret = False
 
         self._floor_list = []
@@ -157,8 +153,8 @@ class LdmElevatorContext(LdmContext):
             else:
                 self._floor_list.append(LdmFloorInfo(str(f), True, False))
 
-        if 63 < len(self._floor_list):
-            self._logger.error("[LCI] LCI supports no more than 63 levels of floors.")
+        if len(self._floor_list) > 63:
+            self._logger.error("[LDM] LDM supports no more than 63 levels of floors.")
             ret = False
 
         if ret == False:
@@ -167,10 +163,6 @@ class LdmElevatorContext(LdmContext):
         self._is_available = True
         self._is_registered = False
         self._is_robot_in_the_car = False
-
-        self._topic_prefix = (
-            f"/ldm/{self._bldg_id}/{self._bank_id}/{self._elevator_id}"  # noqa
-        )
 
         self._current_floor = self._floor_list[0].floor_name
         self._current_door = 0
@@ -238,23 +230,19 @@ class LdmDoorContext(LdmContext):
         ret = True
 
         if self._floor_id == None:
-            self._logger.error("[LCI] <ldm_floor_id> is not specified.")
+            self._logger.error("[LDM] <ldm_floor_id> is not specified.")
             ret = False
 
         if self._door_id == None:
-            self._logger.error("[LCI] <ldm_door_id> is not specified")
+            self._logger.error("[LDM] <ldm_door_id> is not specified")
             ret = False
 
         if self._door_type == None:
-            self._logger.error("[LCI] <ldm_door_type> is not specified")
+            self._logger.error("[LDM] <ldm_door_type> is not specified")
             ret = False
 
         if ret == False:
             return False
-
-        self._topic_prefix = (
-            f"/ldm/{self._bldg_id}/{self._floor_id}/{self._door_id}"  # noqa
-        )
 
         self._is_registered = False
 
@@ -292,7 +280,7 @@ class LdmClient:
     _bldg_id: str
     _context_dict: dict[str, LdmContext]
 
-    _publish_lock: threading.Lock
+    # _publish_lock: threading.Lock
 
     def __init__(self, logger=None) -> None:
         if logger is None:
@@ -302,15 +290,15 @@ class LdmClient:
 
         self._context_dict = {}
 
-        self._publish_lock = threading.Lock()
+        # self._publish_lock = threading.Lock()
 
     def initialize(self, config_file_path: str, cert_dir: str) -> bool:
         """
         Initalization of LdmClient
 
         Args:
-            config_file_path (str): Path of LCI server config file (server_config_<bldg_id>.yaml) for a single building provided by Octa Robotics
-            cert_dir (str): Path of directory including the certificate files of LCI Robot Account provided by Octa Robotics
+            config_file_path (str): Path of LDM server config file (server_config_<bldg_id>.yaml) for a single building provided by Octa Robotics
+            cert_dir (str): Path of directory including the certificate files of LDM Robot Account provided by Octa Robotics
         """
 
         yaml = ruamel.yaml.YAML()
@@ -320,7 +308,7 @@ class LdmClient:
         self._bldg_id = config.get("ldm_bldg_id", None)
 
         if self._bldg_id == None:
-            self._logger.error("[LCI] <ldm_bldg_id> is not specified.")
+            self._logger.error("[LDM] <ldm_bldg_id> is not specified.")
             return False
 
         elevator_config = config.get("elevators", None)
@@ -367,7 +355,7 @@ class LdmClient:
         #             mqtt_port = 8883
 
         #         except Exception as e:
-        #             self._logger.warning(f"[LCI] Exception in LdmClient: {e}")
+        #             self._logger.warning(f"[LDM] Exception in LdmClient: {e}")
 
         #             # Fallback to on-premise version
         #             self._robot_id = f"_DUMMYID"
@@ -380,7 +368,7 @@ class LdmClient:
 
         #     self._mqtt_client.connect(str(self._mqtt_server), port=mqtt_port)
         # except Exception as e:
-        #     self._logger.error("[LCI] Exception in LdmClient: {e}")
+        #     self._logger.error("[LDM] Exception in LdmClient: {e}")
         #     return False
 
         return True
@@ -398,7 +386,7 @@ class LdmClient:
     #     self, client: mqtt.Client, userdata: "LdmClient", flags: dict, rc: int
     # ) -> None:
     #     self._logger.info(
-    #         f"[LCI] Connected to {self._mqtt_server} with client_id {self._robot_id}, result code {rc}"
+    #         f"[LDM] Connected to {self._mqtt_server} with client_id {self._robot_id}, result code {rc}"
     #     )
 
     #     self._mqtt_client.subscribe(
@@ -417,7 +405,7 @@ class LdmClient:
     #     self, client: mqtt.Client, userdata: "LdmClient", rc: int
     # ) -> None:
     #     self._logger.info(
-    #         f"[LCI] Disconnected from {self._mqtt_server} with client_id {self._robot_id}, result code "
+    #         f"[LDM] Disconnected from {self._mqtt_server} with client_id {self._robot_id}, result code "
     #         + str(rc)
     #     )
 
@@ -428,12 +416,12 @@ class LdmClient:
     #     try:
     #         payload_kv = json.loads(msg.payload)
     #     except json.JSONDecodeError as e:
-    #         self._logger.debug(f"[LCI] Skip message with non-JSON payload: {e}")
+    #         self._logger.debug(f"[LDM] Skip message with non-JSON payload: {e}")
     #         return
 
     #     if type(payload_kv) != dict:
     #         self._logger.error(
-    #             f"[LCI] MQTT Payload format error: {msg.topic}, {msg.payload}"
+    #             f"[LDM] MQTT Payload format error: {msg.topic}, {msg.payload}"
     #         )
     #         return
 
@@ -447,13 +435,13 @@ class LdmClient:
     #     context = self._context_dict.get(topic_prefix, None)
     #     if context is not None:
     #         context._msg_callback(api, payload_kv)
-    #         self._logger.debug(f"[LCI] Received: {topic}, {payload_kv}")
+    #         self._logger.debug(f"[LDM] Received: {topic}, {payload_kv}")
 
     #         if not api in ["ElevatorStatus", "DoorStatus"]:
     #             context._response_event.set()
 
     #     else:
-    #         self._logger.warning(f"[LCI] No relevant context for {topic}, {payload_kv}")
+    #         self._logger.warning(f"[LDM] No relevant context for {topic}, {payload_kv}")
 
     # def _publish(
     #     self,
@@ -500,21 +488,21 @@ class LdmClient:
     #             if pub_info.is_published():
     #                 # Elapsed time between PUB and PUBACK
     #                 self._logger.debug(
-    #                     f"[LCI] Published ({time.time()-start_time:.03f}): {topic}, {json_payload}"
+    #                     f"[LDM] Published ({time.time()-start_time:.03f}): {topic}, {json_payload}"
     #                 )  # noqa
 
     #                 if wait_response:
-    #                     # Wait for receiving response from LCI
+    #                     # Wait for receiving response from LDM
     #                     start_time = time.time()
     #                     ret = context._response_event.wait(timeout_sec)
     #                     if ret:
-    #                         # Elapsed time between LCI's request and response
+    #                         # Elapsed time between LDM's request and response
     #                         self._logger.debug(
-    #                             f"[LCI] Response received ({time.time()-start_time:.03f}): {api}"
+    #                             f"[LDM] Response received ({time.time()-start_time:.03f}): {api}"
     #                         )  # noqa
     #                     else:
     #                         self._logger.debug(
-    #                             f"[LCI] Response timeout ({time.time()-start_time:.03f}): {api}"
+    #                             f"[LDM] Response timeout ({time.time()-start_time:.03f}): {api}"
     #                         )  # noqa
     #                     return ret
     #                 else:
@@ -522,7 +510,7 @@ class LdmClient:
 
     #             elif start_time + timeout_sec < time.time():
     #                 self._logger.debug(
-    #                     f"[LCI] Publish timeout ({time.time()-start_time:.03f}): {topic}, {json_payload}"
+    #                     f"[LDM] Publish timeout ({time.time()-start_time:.03f}): {topic}, {json_payload}"
     #                 )  # noqa
     #                 return False
 
@@ -589,68 +577,3 @@ class LdmClient:
 
 # def do_request_door_status(self, context: LdmDoorContext) -> bool:
 #     return self._publish(context, "RequestDoorStatus", {})
-
-
-# Main routine
-if __name__ == "__main__":
-
-    if len(sys.argv) < 2:
-        logging.error(
-            "Please specify yaml config file as the 1 st command line parameter."
-        )
-        sys.exit(1)
-
-    ldm_client = LdmClient()
-
-    if not ldm_client.initialize(config_file_path=sys.argv[1], cert_dir=sys.argv[2]):
-        logging.error("LdmClient initialization error")
-        sys.exit(1)
-
-    context_dict = ldm_client.get_contexts()
-    context = None
-    for c in context_dict.values():
-        if c.get_device_type() is DeviceType.ELEVATOR:
-            context = c
-            break
-
-    if context is None:
-        logging.error("No Elevator Context in the config file")
-        sys.exit(1)
-
-    ldm_client._logger.addHandler(logging.StreamHandler(sys.stdout))
-    ldm_client._logger.setLevel(logging.DEBUG)
-
-    ldm_client.start()
-    time.sleep(2)
-
-    # res = ldm_client.do_registration(context)
-    # ldm_client._logger.debug(res)
-    # time.sleep(1)
-
-    # res = ldm_client.do_call_elevator(context, "B1", "1")
-    # ldm_client._logger.debug(res)
-    # time.sleep(1)
-
-    # res = ldm_client.do_request_elevator_status(context)
-    # ldm_client._logger.debug(res)
-    # time.sleep(1)
-
-    # res = ldm_client.do_request_elevator_status(context)
-    # ldm_client._logger.debug(res)
-    # time.sleep(1)
-
-    # res = ldm_client.do_robot_status(context, RobotStatus.HAS_ENTERED)
-    # ldm_client._logger.debug(res)
-    # time.sleep(1)
-
-    # res = ldm_client.do_robot_status(context, RobotStatus.KEEP_DOOR_OPEN)
-    # ldm_client._logger.debug(res)
-    # time.sleep(1)
-
-    # res = ldm_client.do_robot_status(context, RobotStatus.HAS_GOT_OFF)
-    # ldm_client._logger.debug(res)
-    # time.sleep(1)
-
-    # res = ldm_client.do_release(context)
-    # ldm_client._logger.debug(res)
-    # time.sleep(1)
