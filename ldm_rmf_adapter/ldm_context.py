@@ -5,7 +5,7 @@
 import ruamel.yaml
 
 # import json
-# import sys
+import sys
 import logging
 from enum import IntEnum, Enum
 
@@ -15,6 +15,9 @@ import threading
 
 from abc import ABC, abstractmethod
 from typing import Any, Callable
+
+import ruamel.yaml.comments
+from ldm_fleet_msgs.msg import LiftState as LDMLiftState
 
 
 class RobotStatus(IntEnum):
@@ -36,7 +39,7 @@ class ResultCode(IntEnum):
     SUCCESS = 1
     FAIL = 2
     ERROR = 3
-    UNDER_EMERGENCY = 99
+    UNDER_EMERGENCY = 5
 
 
 class DeviceType(Enum):
@@ -61,8 +64,6 @@ class LdmContext(ABC):
     _logger: Any
 
     _device_type: DeviceType
-
-    _topic_prefix: str
 
     _context_lock: threading.RLock
 
@@ -93,7 +94,7 @@ class LdmContext(ABC):
         return self._device_type
 
     @abstractmethod
-    def _msg_callback(self, api: str, payload: dict) -> None:
+    def _msg_callback(self, msg) -> None:
         pass
 
     def reset(self):
@@ -112,7 +113,7 @@ class LdmElevatorContext(LdmContext):
 
     _is_available: bool
     _is_registered: bool
-    _is_robot_in_the_car: bool
+    _motion_state: int
 
     _current_floor: str
     _current_door: int
@@ -120,9 +121,8 @@ class LdmElevatorContext(LdmContext):
     _target_floor: str
     _target_door: int
 
-    def __init__(self, bldg_id: str, logger=None) -> None:
+    def __init__(self, logger=None) -> None:
         super().__init__(DeviceType.ELEVATOR, logger)
-        self._bldg_id = bldg_id
 
     def initialize(self, config: dict) -> bool:
         self._elevator_id = config.get("ldm_elevator_id", None)
@@ -162,7 +162,7 @@ class LdmElevatorContext(LdmContext):
 
         self._is_available = True
         self._is_registered = False
-        self._is_robot_in_the_car = False
+        self._motion_state = 0
 
         self._current_floor = self._floor_list[0].floor_name
         self._current_door = 0
@@ -174,41 +174,31 @@ class LdmElevatorContext(LdmContext):
     def _reset(self):
         with self._context_lock:
             self._is_registered = False
-            self._is_robot_in_the_car = False
+            self._motion_state = 0
             self._target_floor = ""
             self._target_door = 0
 
-    def _msg_callback(self, api: str, payload: dict) -> None:
-        result = payload.get("result", ResultCode.ERROR.value)
-
+    def _msg_callback(self, msg: LDMLiftState) -> None:
+        # result = payload.get("result", ResultCode.ERROR.value)
+        current_mode = msg.current_mode
         with self._context_lock:
-            match result:
-                case ResultCode.UNDER_EMERGENCY.value:
+            match current_mode:
+                case LDMLiftState.MODE_EMERGENCY:
                     self._is_available = False
                     self.reset()
 
-                case ResultCode.SUCCESS.value:
-                    self._is_available = True
-
-                    match api:
-                        case "RegistrationResult":
-                            if not payload.get("dry_run", False):
-                                self._is_registered = True
-                        case "ReleaseResult":
-                            self.reset()
-                        case "ElevatorStatus":
-                            self._current_floor = payload.get(
-                                "floor", self._current_floor
-                            )
-                            self._current_door = payload.get("door", 0)
-
                 case _:
                     self._is_available = True
-                    self._is_registered = False
+                    if msg.register_state == LDMLiftState.REGISTER_SIGNED:
+                        self._is_registered = True
+                    elif msg.register_state == LDMLiftState.REGISTER_RELEASED:
+                        self._is_registered = False
+
+                    self._current_floor = msg.current_floor
+                    self._current_door = msg.door_state
 
 
 class LdmDoorContext(LdmContext):
-    _bldg_id: str
     _floor_id: str
     _door_id: str
     _door_type: str
@@ -218,9 +208,8 @@ class LdmDoorContext(LdmContext):
     _current_door: int
     _current_lock: int
 
-    def __init__(self, bldg_id: str, logger=None) -> None:
+    def __init__(self, logger=None) -> None:
         super().__init__(DeviceType.DOOR, logger)
-        self._bldg_id = bldg_id
 
     def initialize(self, config: dict) -> bool:
         self._floor_id = config.get("ldm_floor_id", None)
@@ -256,28 +245,28 @@ class LdmDoorContext(LdmContext):
         self._current_door = 0
         self._current_lock = 1
 
-    def _msg_callback(self, api: str, payload: dict) -> None:
-        result = payload.get("result", ResultCode.ERROR.value)
+    def _msg_callback(self, msg) -> None:
+        pass
+        # result = payload.get("result", ResultCode.ERROR.value)
 
-        with self._context_lock:
-            if result == ResultCode.SUCCESS.value:
-                match api:
-                    case "RegistrationResult":
-                        if not payload.get("dry_run", False):
-                            self._is_registered = True
-                    case "ReleaseResult":
-                        self.reset()
-                    case "DoorStatus":
-                        if self._door_type == "lock":
-                            self._current_lock = payload.get("lock", 1)
-                        else:
-                            self._current_door = payload.get("door", 0)
+        # with self._context_lock:
+        #     if result == ResultCode.SUCCESS.value:
+        #         match api:
+        #             case "RegistrationResult":
+        #                 if not payload.get("dry_run", False):
+        #                     self._is_registered = True
+        #             case "ReleaseResult":
+        #                 self.reset()
+        #             case "DoorStatus":
+        #                 if self._door_type == "lock":
+        #                     self._current_lock = payload.get("lock", 1)
+        #                 else:
+        #                     self._current_door = payload.get("door", 0)
 
 
 class LdmClient:
     _logger: Any
 
-    _bldg_id: str
     _context_dict: dict[str, LdmContext]
 
     # _publish_lock: threading.Lock
@@ -292,84 +281,24 @@ class LdmClient:
 
         # self._publish_lock = threading.Lock()
 
-    def initialize(self, config_file_path: str, cert_dir: str) -> bool:
-        """
-        Initalization of LdmClient
-
-        Args:
-            config_file_path (str): Path of LDM server config file (server_config_<bldg_id>.yaml) for a single building provided by Octa Robotics
-            cert_dir (str): Path of directory including the certificate files of LDM Robot Account provided by Octa Robotics
-        """
-
+    def initialize(self, config_file_path: str) -> bool:
         yaml = ruamel.yaml.YAML()
         with open(config_file_path) as file:
             config = yaml.load(file.read())
 
-        self._bldg_id = config.get("ldm_bldg_id", None)
-
-        if self._bldg_id == None:
-            self._logger.error("[LDM] <ldm_bldg_id> is not specified.")
-            return False
-
         elevator_config = config.get("elevators", None)
         if type(elevator_config) is ruamel.yaml.comments.CommentedSeq:
             for ec in elevator_config:
-                context = LdmElevatorContext(self._bldg_id, self._logger)
+                context = LdmElevatorContext(self._logger)
                 if context.initialize(ec):
-                    context._bldg_id = self._bldg_id
-                    self._context_dict.update({context._topic_prefix: context})
+                    self._context_dict.update({context._elevator_id: context})
 
         door_config = config.get("doors", None)
         if type(door_config) is ruamel.yaml.comments.CommentedSeq:
             for dc in door_config:
-                context = LdmDoorContext(self._bldg_id, self._logger)
+                context = LdmDoorContext(self._logger)
                 if context.initialize(dc):
-                    self._context_dict.update({context._topic_prefix: context})
-
-        # try:
-        #     self._mqtt_client = mqtt.Client(protocol=mqtt.MQTTv311, userdata=self)
-
-        #     # Default client_id. It is needed for on-premise version
-        #     self._robot_id = f"_DUMMYID"
-        #     mqtt_port = 1883
-
-        #     if cert_dir != None:
-        #         try:
-        #             with open(cert_dir + "/ClientID") as file:
-        #                 self._robot_id = file.readline().replace("\n", "")
-
-        #             self._mqtt_client.reinitialise(
-        #                 client_id=self._robot_id, userdata=self
-        #             )
-
-        #             ca_files = glob.glob(cert_dir + "/*.pem")
-        #             cert_files = glob.glob(cert_dir + "/*certificate.pem.crt")
-        #             key_files = glob.glob(cert_dir + "/*private.pem.key")
-
-        #             self._mqtt_client.tls_set(
-        #                 ca_files[0],
-        #                 cert_files[0],
-        #                 key_files[0],
-        #                 tls_version=ssl.PROTOCOL_TLSv1_2,
-        #             )
-        #             mqtt_port = 8883
-
-        #         except Exception as e:
-        #             self._logger.warning(f"[LDM] Exception in LdmClient: {e}")
-
-        #             # Fallback to on-premise version
-        #             self._robot_id = f"_DUMMYID"
-        #             mqtt_port = 1883
-
-        #     self._mqtt_client.on_connect = self._on_connect
-        #     self._mqtt_client.on_message = self._on_message
-        #     self._mqtt_client.on_disconnect = self._on_disconnect
-        #     # self.mqtt_client.enable_logger(self.logger)
-
-        #     self._mqtt_client.connect(str(self._mqtt_server), port=mqtt_port)
-        # except Exception as e:
-        #     self._logger.error("[LDM] Exception in LdmClient: {e}")
-        #     return False
+                    self._context_dict.update({context._door_id: context})
 
         return True
 
@@ -577,3 +506,35 @@ class LdmClient:
 
 # def do_request_door_status(self, context: LdmDoorContext) -> bool:
 #     return self._publish(context, "RequestDoorStatus", {})
+
+# Main routine
+if __name__ == "__main__":
+
+    # if len(sys.argv) < 2:
+    #     logging.error(
+    #         "Please specify yaml config file as the 1 st command line parameter."
+    #     )
+    #     sys.exit(1)
+
+    ldm_context = LdmClient()
+
+    if not ldm_context.initialize(
+        config_file_path="/home/tannhat/rmf_ws/src/ldm_rmf_adapter/ldm_config/server_config_simulator.yaml"
+    ):
+        logging.error("LdmClient initialization error")
+        sys.exit(1)
+
+    context_dict = ldm_context.get_contexts()
+    context = None
+    for c in context_dict.values():
+        if c.get_device_type() is DeviceType.ELEVATOR:
+            context = c
+            print(f"elevator_id: {c._elevator_id}")
+            # break
+
+    if context is None:
+        logging.error("No Elevator Context in the config file")
+        sys.exit(1)
+
+    ldm_context._logger.addHandler(logging.StreamHandler(sys.stdout))
+    ldm_context._logger.setLevel(logging.DEBUG)

@@ -1,20 +1,36 @@
 elevators:
-    ldm_elevator_id: "LIFT-001"
+  - ldm_elevator_id: "LIFT-001"
     ldm_timeout_sec: 180
     ldm_floor_list:
       - ["L1", True, False]
       - ["L2", True, False]
-    
+  - ldm_elevator_id: "LIFT-002"
+    ldm_timeout_sec: 180
+    ldm_floor_list:
+      - ["L1", True, False]
+      - ["L2", True, False]
+  - ldm_elevator_id: "LIFT-003"
+    ldm_timeout_sec: 180
+    ldm_floor_list:
+      - ["L1", True, False]
+      - ["L2", True, False]
+  - ldm_elevator_id: "LIFT-004"
+    ldm_timeout_sec: 180
+    ldm_floor_list:
+      - ["L1", True, False]
+      - ["L2", True, False]
+
+
 doors:
   - ldm_floor_id: "3F"
     ldm_door_id: "1"
     ldm_door_type: door
     ldm_timeout_sec: 60
   - ldm_floor_id: "7F"
-    ldm_door_id: "1"
+    ldm_door_id: "2"
     ldm_door_type: flap
     ldm_timeout_sec: 60
   - ldm_floor_id: "7F"
-    ldm_door_id: "2"
+    ldm_door_id: "3"
     ldm_door_type: lock
     ldm_timeout_sec: 60
