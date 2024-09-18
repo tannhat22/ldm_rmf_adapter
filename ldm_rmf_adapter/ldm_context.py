@@ -113,13 +113,13 @@ class LdmElevatorContext(LdmContext):
 
     _is_available: bool
     _is_registered: bool
-    _motion_state: int
+    _current_motion: int
 
     _current_floor: str
     _current_door: int
 
     _target_floor: str
-    _target_door: int
+    # _target_door: int
 
     def __init__(self, logger=None) -> None:
         super().__init__(DeviceType.ELEVATOR, logger)
@@ -162,21 +162,21 @@ class LdmElevatorContext(LdmContext):
 
         self._is_available = True
         self._is_registered = False
-        self._motion_state = 0
+        self._current_motion = 3
 
         self._current_floor = self._floor_list[0].floor_name
         self._current_door = 0
         self._target_floor = ""
-        self._target_door = 0
+        # self._target_door = 0
 
         return True
 
     def _reset(self):
         with self._context_lock:
             self._is_registered = False
-            self._motion_state = 0
+            self._current_motion = 3
             self._target_floor = ""
-            self._target_door = 0
+            # self._target_door = 0
 
     def _msg_callback(self, msg: LDMLiftState) -> None:
         # result = payload.get("result", ResultCode.ERROR.value)
@@ -196,6 +196,7 @@ class LdmElevatorContext(LdmContext):
 
                     self._current_floor = msg.current_floor
                     self._current_door = msg.door_state
+                    self._current_motion = msg.motion_state
 
 
 class LdmDoorContext(LdmContext):
@@ -305,207 +306,6 @@ class LdmClient:
     def get_contexts(self) -> dict[str, LdmContext]:
         return self._context_dict
 
-    # def start(self):
-    #     self._mqtt_client.loop_start()
-
-    # def stop(self):
-    #     self._mqtt_client.loop_stop()
-
-    # def _on_connect(
-    #     self, client: mqtt.Client, userdata: "LdmClient", flags: dict, rc: int
-    # ) -> None:
-    #     self._logger.info(
-    #         f"[LDM] Connected to {self._mqtt_server} with client_id {self._robot_id}, result code {rc}"
-    #     )
-
-    #     self._mqtt_client.subscribe(
-    #         [
-    #             (f"/ldm/{self._bldg_id}/+/+/RegistrationResult/{self._robot_id}", 1),
-    #             (f"/ldm/{self._bldg_id}/+/+/CallElevatorResult/{self._robot_id}", 1),
-    #             (f"/ldm/{self._bldg_id}/+/+/ElevatorStatus/{self._robot_id}", 1),
-    #             (f"/ldm/{self._bldg_id}/+/+/OpenDoorResult/{self._robot_id}", 1),
-    #             (f"/ldm/{self._bldg_id}/+/+/DoorStatus/{self._robot_id}", 1),
-    #             (f"/ldm/{self._bldg_id}/+/+/RobotStatusResult/{self._robot_id}", 1),
-    #             (f"/ldm/{self._bldg_id}/+/+/ReleaseResult/{self._robot_id}", 1),
-    #         ]
-    #     )
-
-    # def _on_disconnect(
-    #     self, client: mqtt.Client, userdata: "LdmClient", rc: int
-    # ) -> None:
-    #     self._logger.info(
-    #         f"[LDM] Disconnected from {self._mqtt_server} with client_id {self._robot_id}, result code "
-    #         + str(rc)
-    #     )
-
-    # def _on_message(
-    #     self, client: mqtt.Client, userdata: "LdmClient", msg: mqtt.MQTTMessage
-    # ):
-
-    #     try:
-    #         payload_kv = json.loads(msg.payload)
-    #     except json.JSONDecodeError as e:
-    #         self._logger.debug(f"[LDM] Skip message with non-JSON payload: {e}")
-    #         return
-
-    #     if type(payload_kv) != dict:
-    #         self._logger.error(
-    #             f"[LDM] MQTT Payload format error: {msg.topic}, {msg.payload}"
-    #         )
-    #         return
-
-    #     self._msg_callback(msg.topic, payload_kv)
-
-    # def _msg_callback(self, topic: str, payload_kv: dict) -> None:
-    #     token = topic.split("/")
-    #     topic_prefix = "/".join(token[0:5])
-    #     api = token[-2]
-
-    #     context = self._context_dict.get(topic_prefix, None)
-    #     if context is not None:
-    #         context._msg_callback(api, payload_kv)
-    #         self._logger.debug(f"[LDM] Received: {topic}, {payload_kv}")
-
-    #         if not api in ["ElevatorStatus", "DoorStatus"]:
-    #             context._response_event.set()
-
-    #     else:
-    #         self._logger.warning(f"[LDM] No relevant context for {topic}, {payload_kv}")
-
-    # def _publish(
-    #     self,
-    #     context: LdmContext,
-    #     api: str,
-    #     payload: dict,
-    #     timeout_sec: float = 0,
-    #     wait_response: bool = True,
-    # ) -> bool:
-    #     topic = f"{context._topic_prefix}/{api}/{self._robot_id}"
-    #     payload.update(
-    #         {
-    #             "robot_id": self._robot_id,
-    #             "timestamp": int(time.time() * 1000) / 1000,
-    #         }
-    #     )
-    #     json_payload = json.dumps(payload)
-
-    #     need_to_sync = (0 < timeout_sec) and (
-    #         not api in ["RequestElevatorStatus", "RequestDoorStatus"]
-    #     )
-
-    #     if need_to_sync:
-    #         context._response_event.clear()
-    #         qos = 1
-    #     else:
-    #         qos = 0
-
-    #     with self._publish_lock:
-    #         pub_info = self._mqtt_client.publish(topic, json_payload, qos=qos)
-
-    #     if need_to_sync:
-    #         # Wait for completion of publish()
-    #         start_time = time.time()
-    #         while True:
-    #             try:
-    #                 # When the state is disconnection, wait_for_publish() will return soon with Exception
-    #                 pub_info.wait_for_publish(timeout=0.2)
-
-    #             except Exception:
-    #                 time.sleep(0.2)
-    #                 continue
-
-    #             if pub_info.is_published():
-    #                 # Elapsed time between PUB and PUBACK
-    #                 self._logger.debug(
-    #                     f"[LDM] Published ({time.time()-start_time:.03f}): {topic}, {json_payload}"
-    #                 )  # noqa
-
-    #                 if wait_response:
-    #                     # Wait for receiving response from LDM
-    #                     start_time = time.time()
-    #                     ret = context._response_event.wait(timeout_sec)
-    #                     if ret:
-    #                         # Elapsed time between LDM's request and response
-    #                         self._logger.debug(
-    #                             f"[LDM] Response received ({time.time()-start_time:.03f}): {api}"
-    #                         )  # noqa
-    #                     else:
-    #                         self._logger.debug(
-    #                             f"[LDM] Response timeout ({time.time()-start_time:.03f}): {api}"
-    #                         )  # noqa
-    #                     return ret
-    #                 else:
-    #                     return True
-
-    #             elif start_time + timeout_sec < time.time():
-    #                 self._logger.debug(
-    #                     f"[LDM] Publish timeout ({time.time()-start_time:.03f}): {topic}, {json_payload}"
-    #                 )  # noqa
-    #                 return False
-
-    #     return True
-
-
-# def do_registration(self, context: LdmContext, dry_run: bool = False) -> bool:
-#     if dry_run:
-#         payload = {"dry_run": True}
-#     else:
-#         payload = {}
-
-#     return self._publish(context, "Registration", payload, 180)
-
-# def do_release(self, context: LdmContext, wait_response: bool = True) -> bool:
-#     return self._publish(context, "Release", {}, 20, wait_response)
-
-# def do_robot_status(
-#     self, context: LdmContext, robot_status: RobotStatus, wait_response: bool = True
-# ) -> bool:
-#     return self._publish(
-#         context, "RobotStatus", {"state": robot_status.value}, 20, wait_response
-#     )
-
-# def do_call_elevator(
-#     self,
-#     context: LdmElevatorContext,
-#     origination: str,
-#     destination: str,
-#     origination_door: int = 0,
-#     destination_door: int = 0,
-#     direction: int = 0,
-# ) -> bool:
-
-#     if context._target_floor == "":
-#         context._target_floor = origination
-#         context._target_door = origination_door
-#     else:
-#         context._target_floor = destination
-#         context._target_door = destination_door
-
-#     payload = {"direction": direction}
-
-#     if origination is not None:
-#         payload.update(
-#             {"origination": origination, "origination_door": origination_door}
-#         )
-
-#     if destination is not None:
-#         payload.update(
-#             {"destination": destination, "destination_door": destination_door}
-#         )
-
-#     return self._publish(context, "CallElevator", payload, 180)
-
-# def do_request_elevator_status(self, context: LdmElevatorContext) -> bool:
-#     return self._publish(context, "RequestElevatorStatus", {})
-
-# def do_open_door(self, context: LdmDoorContext, direction: int = None) -> bool:
-#     if context._device_type == "flap" and direction is not None:
-#         return self._publish(context, "OpenDoor", {"direciton": direction}, 20)
-#     else:
-#         return self._publish(context, "OpenDoor", {}, 20)
-
-# def do_request_door_status(self, context: LdmDoorContext) -> bool:
-#     return self._publish(context, "RequestDoorStatus", {})
 
 # Main routine
 if __name__ == "__main__":
@@ -519,7 +319,7 @@ if __name__ == "__main__":
     ldm_context = LdmClient()
 
     if not ldm_context.initialize(
-        config_file_path="/home/tannhat/rmf_ws/src/ldm_rmf_adapter/ldm_config/server_config_simulator.yaml"
+        config_file_path="/home/tannhat/rmf_ws/src/ldm_rmf_adapter/config.yaml"
     ):
         logging.error("LdmClient initialization error")
         sys.exit(1)

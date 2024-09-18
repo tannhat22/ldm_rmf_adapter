@@ -10,7 +10,6 @@ from rmf_lift_msgs.msg import LiftState, LiftRequest
 from rmf_door_msgs.msg import DoorState, DoorRequest, DoorMode
 from ldm_fleet_msgs.msg import (
     FleetLiftState,
-    LiftState as LDMLiftState,
     LiftRequest as LDMLiftRequest,
     RegisterRequest,
 )
@@ -104,14 +103,11 @@ class RmfLiftContext(RmfContext):
 
         # encode door direction to floor_name
         match self._ldm_context._current_door:
-            case 2:  # Front door opened
-                lift_state.current_floor = self._ldm_context._current_floor
-                lift_state.door_state = LiftState.DOOR_OPEN
-            case 1:
-                lift_state.current_floor = self._ldm_context._current_floor
+            case 0:
                 lift_state.door_state = LiftState.DOOR_CLOSED
+            case 2:
+                lift_state.door_state = LiftState.DOOR_OPEN
             case _:
-                lift_state.current_floor = self._ldm_context._current_floor
                 lift_state.door_state = LiftState.DOOR_MOVING
 
         # if self._ldm_context._target_door == 2:
@@ -120,19 +116,21 @@ class RmfLiftContext(RmfContext):
         #     )
         # else:
         #     lift_state.destination_floor = self._ldm_context._target_floor
+        lift_state.current_floor = self._ldm_context._current_floor
         lift_state.destination_floor = self._ldm_context._target_floor
+        lift_state.motion_state = self._ldm_context._current_motion
 
-        if (
-            lift_state.current_floor == lift_state.destination_floor
-            and lift_state.door_state == LiftState.DOOR_OPEN
-        ):
-            lift_state.motion_state = LiftState.MOTION_STOPPED
-        else:
-            lift_state.motion_state = LiftState.MOTION_UNKNOWN
+        # if (
+        #     lift_state.current_floor == lift_state.destination_floor
+        #     and lift_state.door_state == LiftState.DOOR_OPEN
+        # ):
+        #     lift_state.motion_state = LiftState.MOTION_STOPPED
+        # else:
+        #     lift_state.motion_state = LiftState.MOTION_UNKNOWN
 
         lift_state.available_modes = [
-            LiftState.MODE_OFFLINE,
             LiftState.MODE_AGV,
+            LiftState.MODE_OFFLINE,
             LiftState.MODE_EMERGENCY,
         ]
 
@@ -181,6 +179,8 @@ class LdmRmfAdapter(Node):
 
     def __init__(self) -> None:
         super().__init__("LdmRmfAdapter")
+
+        fleet_cb_group = MutuallyExclusiveCallbackGroup()
 
         # Parameters used in this Node
         self.declare_parameter(
@@ -245,9 +245,9 @@ class LdmRmfAdapter(Node):
         )
 
         # To publish door status to RMF
-        self._door_state_pub = self.create_publisher(
-            DoorState, "door_states", qos_profile=state_qos_profile
-        )
+        # self._door_state_pub = self.create_publisher(
+        #     DoorState, "door_states", qos_profile=state_qos_profile
+        # )
 
         # To publish lift request to Fleet Lift Server
         self._ldm_lift_request_pub = self.create_publisher(
@@ -256,7 +256,7 @@ class LdmRmfAdapter(Node):
 
         # To publish register request to Fleet Lift Server
         self._ldm_register_request_pub = self.create_publisher(
-            LDMLiftRequest, "register_ldm_requests", qos_profile=state_qos_profile
+            RegisterRequest, "register_ldm_requests", qos_profile=state_qos_profile
         )
 
         # Subscribe lift requests from RMF
@@ -270,32 +270,30 @@ class LdmRmfAdapter(Node):
 
         # Subscribe door requests from RMF
         # https://osrf.github.io/ros2multirobotbook/integration_doors.html
-        self._door_request_sub = self.create_subscription(
-            DoorRequest,
-            "adapter_door_requests",
-            self._door_request_callback,
-            qos_profile=request_qos_profile,
-        )
+        # self._door_request_sub = self.create_subscription(
+        #     DoorRequest,
+        #     "adapter_door_requests",
+        #     self._door_request_callback,
+        #     qos_profile=request_qos_profile,
+        # )
 
         # Subscribe fleet lift state from Fleet Lift Server
         self._fleet_lift_state_sub = self.create_subscription(
             FleetLiftState,
-            "fleet_lift_state",
+            "fleet_ldm_state",
             self._fleet_lift_state_callback,
-            qos_profile=request_qos_profile,
+            100,
+            callback_group=fleet_cb_group,
         )
 
         # To publish all LiftState and DoorState every second.
         self._pub_rmf_state_timer = self.create_timer(1.0, self._publish_rmf_states)
 
-        # To send RequestElevatorStatus and RequestDoorStatus to LCI every 3 seconds when registered.
-        # self._sync_ldm_status_timer = self.create_timer(3.0, self._sync_ldm_status)
-
     def next_cmd_id(self):
         self.current_cmd_id = self.current_cmd_id + 1
         return self.current_cmd_id
 
-    def _publish_rmf_states(self, msgs: FleetLiftState):
+    def _publish_rmf_states(self):
         current_time = self.get_clock().now().to_msg()
         # is_connected = self._ldm_client._mqtt_client.is_connected()
 
@@ -308,14 +306,14 @@ class LdmRmfAdapter(Node):
 
             self._lift_state_pub.publish(lift_state)
 
-        for rd_context in self._door_context_dict.values():
-            door_state = rd_context.get_status()
+        # for rd_context in self._door_context_dict.values():
+        #     door_state = rd_context.get_status()
 
-            # if not is_connected:
-            #     door_state.current_mode = DoorMode(value=DoorMode.MODE_OFFLINE)
-            door_state.door_time = current_time
+        #     # if not is_connected:
+        #     #     door_state.current_mode = DoorMode(value=DoorMode.MODE_OFFLINE)
+        #     door_state.door_time = current_time
 
-            self._door_state_pub.publish(door_state)
+        #     self._door_state_pub.publish(door_state)
 
     def _lift_request_callback(self, msg: LiftRequest) -> None:
         rl_context = self._lift_context_dict.get(msg.lift_name, None)
@@ -390,7 +388,6 @@ class LdmRmfAdapter(Node):
 
                 if rl_context._ldm_context._target_floor == "":
                     # 1st CallElevator when the robot may be out of the cage.
-
                     if len(target_floor_list) == 2:
                         origination = target_floor_list[0]
                         destination = target_floor_list[1]
@@ -406,17 +403,6 @@ class LdmRmfAdapter(Node):
 
                 else:
                     # 2nd CallElevator when the robot may be in the cage.
-
-                    # res = self._ldm_client.do_robot_status(
-                    #     rl_context._ldm_context, ldm_context.RobotStatus.HAS_ENTERED
-                    # )
-
-                    # if not res:
-                    #     self.get_logger().error(f"[{msg.lift_name}] RobotStatus failed")
-                    #     self.reset_lift(rl_context)
-                    #     self.get_logger().info(f"[{msg.lift_name}] Release")
-                    #     return
-
                     if len(target_floor_list) == 2:
                         destination = target_floor_list[1]
                     else:
@@ -426,29 +412,18 @@ class LdmRmfAdapter(Node):
                         f"[{msg.lift_name}] 2nd CallElevator: {destination}"
                     )
 
-                origination_door: int = None
-                destination_door: int = None
-
                 # decode door direction from floor_name
-                if origination is not None:
-                    if origination.endswith("_r"):
-                        origination_door = 2
-                        origination = origination[0:-2]
-                    else:
-                        origination_door = 1
+                destination_door = msg.door_state
+                # if origination is not None and origination.endswith("_r"):
+                #     origination = origination[0:-2]
 
-                if destination is not None:
-                    if destination.endswith("_r"):
-                        destination_door = 2
-                        destination = destination[0:-2]
-                    else:
-                        destination_door = 1
+                # if destination is not None and destination.endswith("_r"):
+                #     destination = destination[0:-2]
 
-                res = self._ldm_client(
+                res = self.do_call_elevator(
                     rl_context._ldm_context,
                     origination,
                     destination,
-                    origination_door,
                     destination_door,
                 )
                 if not res:
@@ -462,17 +437,17 @@ class LdmRmfAdapter(Node):
                 )
 
     def reset_lift(self, rl_context: RmfLiftContext):
-        if rl_context._ldm_context._is_registered:
-            # RMF Lift API does not have information where the robot is. Then, HAS_GOT_OFF used for LCI to reset.
-            # For resetting, no need to receive the corresponding response from LCI
-            self._ldm_client.do_robot_status(
-                rl_context._ldm_context, ldm_context.RobotStatus.HAS_GOT_OFF, False
-            )
-            time.sleep(1)
+        # if rl_context._ldm_context._is_registered:
+        #     # RMF Lift API does not have information where the robot is. Then, HAS_GOT_OFF used for LCI to reset.
+        #     # For resetting, no need to receive the corresponding response from LCI
+        #     self._ldm_client.do_robot_status(
+        #         rl_context._ldm_context, ldm_context.RobotStatus.HAS_GOT_OFF, False
+        #     )
+        #     time.sleep(1)
 
         # For resetting, no need to receive the corresponding response from LCI
         self.do_release(rl_context._ldm_context)
-        rl_context.reset()
+        rl_context._ldm_context.reset()
 
     def _door_request_callback(self, msg: DoorRequest) -> None:
         rd_context = self._door_context_dict.get(msg.door_name, None)
@@ -504,7 +479,7 @@ class LdmRmfAdapter(Node):
                         return
                     self.get_logger().info(f"[{msg.door_name}] Registration")
 
-                res = self._ldm_client.do_open_door(rd_context._ldm_context)
+                res = self.do_open_door(rd_context._ldm_context)
                 if not res:
                     self.get_logger().error(f"[{msg.door_name}] OpenDoor failed")
                     self.reset_door(rd_context)
@@ -517,48 +492,57 @@ class LdmRmfAdapter(Node):
         rd_context.reset()
 
     def _fleet_lift_state_callback(self, lift_states: FleetLiftState):
-        pass
+        lifts = lift_states.lifts
+        for l in lifts:
+            rl_context = self._lift_context_dict.get(l.lift_name, None)
+            if rl_context is not None:
+                rl_context._ldm_context._msg_callback(msg=l)
 
-    def do_registration(self, context: ldm_context.LdmContext):
+    def do_registration(
+        self, context: ldm_context.LdmElevatorContext | ldm_context.LdmDoorContext
+    ):
         msg = RegisterRequest()
         match context.get_device_type():
             case ldm_context.DeviceType.ELEVATOR:
                 msg.device_name = context._elevator_id
                 msg.device_type = RegisterRequest.DEVICE_LIFT
                 msg.register_mode = RegisterRequest.REGISTER_SIGNED
-                msg.request_id = self.next_cmd_id()
+                msg.request_id = str(self.next_cmd_id())
                 self._ldm_register_request_pub.publish(msg)
 
-                flag = True
                 startTime = self.get_clock().now()
-                while flag:
+                while True:
                     durationTime = (self.get_clock().now() - startTime).nanoseconds * (
                         10 ** (-9)
                     )
                     if durationTime < self.timeout:
-                        is_success, lift_states = (
-                            rclpy.wait_for_message.wait_for_message(
-                                FleetLiftState,
-                                self,
-                                "/fleet_lift_state",
-                                time_to_wait=5.0,
-                            )
-                        )
-                        if is_success:
-                            lifts = lift_states.lifts
-                            for l in lifts:
-                                if l.lift_name == context._elevator_id:
-                                    if (
-                                        l.register_state
-                                        == LDMLiftState.REGISTER_RELEASED
-                                    ):
-                                        return True
-                                    break
-                        else:
-                            self.get_logger().error(
-                                "No receive messages from /fleet_lift_state topic!"
-                            )
-                            return False
+                        with context._context_lock:
+                            if context._is_registered:
+                                return True
+                        time.sleep(0.5)
+                        # is_success, lift_states = (
+                        #     rclpy.wait_for_message.wait_for_message(
+                        #         FleetLiftState,
+                        #         self,
+                        #         "/fleet_lift_state",
+                        #         time_to_wait=5.0,
+                        #     )
+                        # )
+                        # if is_success:
+                        #     lifts = lift_states.lifts
+                        #     for l in lifts:
+                        #         if l.lift_name == context._elevator_id:
+                        #             if (
+                        #                 l.register_state
+                        #                 == LDMLiftState.REGISTER_RELEASED
+                        #             ):
+                        #                 return True
+                        #             break
+                        # else:
+                        #     self.get_logger().error(
+                        #         "No receive messages from /fleet_lift_state topic!"
+                        #     )
+                        #     return False
                     else:
                         self.get_logger().error(f"Timeout wait for register request!")
                         return False
@@ -567,7 +551,7 @@ class LdmRmfAdapter(Node):
                 msg.device_name = context._door_id
                 msg.device_type = RegisterRequest.DEVICE_DOOR
                 msg.register_mode = RegisterRequest.REGISTER_SIGNED
-                msg.request_id = self.next_cmd_id()
+                msg.request_id = str(self.next_cmd_id())
                 self._ldm_register_request_pub.publish(msg)
                 return True
 
@@ -581,14 +565,47 @@ class LdmRmfAdapter(Node):
                 msg.device_name = context._door_id
                 msg.device_type = RegisterRequest.DEVICE_DOOR
         msg.register_mode = RegisterRequest.REGISTER_RELEASED
-        msg.request_id = self.next_cmd_id()
+        msg.request_id = str(self.next_cmd_id())
         self._ldm_register_request_pub.publish(msg)
+
+    def do_call_elevator(
+        self,
+        context: ldm_context.LdmElevatorContext,
+        origination: str,
+        destination: str,
+        destination_door: int = 0,
+    ) -> bool:
+        if context._target_floor == "":
+            context._target_floor = origination
+        else:
+            context._target_floor = destination
+
+        msg = LDMLiftRequest()
+        msg.lift_name = context._elevator_id
+        msg.request_type = LDMLiftRequest.REQUEST_AGV_MODE
+        msg.destination_floor = context._target_floor
+        msg.door_state = destination_door
+        msg.request_id = str(self.next_cmd_id())
+        self._ldm_lift_request_pub.publish(msg)
+        return True
 
 
 def main(args=None):
     rclpy.init(args=args)
     ldm_rmf_lift_adapter = LdmRmfAdapter()
-    rclpy.spin(ldm_rmf_lift_adapter)
+    executor = MultiThreadedExecutor()
+    executor.add_node(node=ldm_rmf_lift_adapter)
+    # rclpy.spin(ldm_rmf_lift_adapter)
+    # ldm_rmf_lift_adapter.destroy_node()
+    # rclpy.shutdown()
+
+    try:
+        ldm_rmf_lift_adapter.get_logger().info(
+            "Beginning client, shut down with CTRL-C"
+        )
+        executor.spin()
+    except KeyboardInterrupt:
+        ldm_rmf_lift_adapter.get_logger().info("Keyboard interrupt, shutting down.\n")
     ldm_rmf_lift_adapter.destroy_node()
     rclpy.shutdown()
 

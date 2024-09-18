@@ -4,22 +4,6 @@ elevators:
     ldm_floor_list:
       - ["L1", True, False]
       - ["L2", True, False]
-  - ldm_elevator_id: "LIFT-002"
-    ldm_timeout_sec: 180
-    ldm_floor_list:
-      - ["L1", True, False]
-      - ["L2", True, False]
-  - ldm_elevator_id: "LIFT-003"
-    ldm_timeout_sec: 180
-    ldm_floor_list:
-      - ["L1", True, False]
-      - ["L2", True, False]
-  - ldm_elevator_id: "LIFT-004"
-    ldm_timeout_sec: 180
-    ldm_floor_list:
-      - ["L1", True, False]
-      - ["L2", True, False]
-
 
 doors:
   - ldm_floor_id: "3F"
