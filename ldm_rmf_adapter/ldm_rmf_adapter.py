@@ -293,6 +293,19 @@ class LdmRmfAdapter(Node):
         self.current_cmd_id = self.current_cmd_id + 1
         return self.current_cmd_id
 
+    def robot_name_analyst(self, requester_id: str) -> None | list[str]:
+        requester_analyst = requester_id.split("/")
+        if (
+            len(requester_analyst) != 2
+            or requester_analyst[0] == ""
+            or requester_analyst[1] == ""
+        ):
+            self.get_logger().error(
+                f"format of requester_id: '{requester_id}' incorrect!"
+            )
+            return None
+        return requester_analyst
+
     def _publish_rmf_states(self):
         current_time = self.get_clock().now().to_msg()
         # is_connected = self._ldm_client._mqtt_client.is_connected()
@@ -369,7 +382,10 @@ class LdmRmfAdapter(Node):
                         )
                         return
 
-                if rl_context.get_destination_floor() == msg.destination_floor:
+                if (
+                    rl_context.get_destination_floor() == msg.destination_floor
+                    and rl_context.get_occupant() != "rmf_api_server"
+                ):
                     # Because RMF sends same LiftRequest in 1 Hz, ldm-rmf-adapter has to neglect those redundant requests by checking whether LiftRequest.destination_floor changes.
                     return
                 rl_context.set_destination_floor(msg.destination_floor)

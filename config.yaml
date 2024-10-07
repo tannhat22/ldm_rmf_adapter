@@ -2,8 +2,8 @@ elevators:
   - ldm_elevator_id: "LIFT-001"
     ldm_timeout_sec: 180
     ldm_floor_list:
-      - ["L1", True, False]
-      - ["L2", True, False]
+      - [L1, True, False]
+      - [L2, True, False]
 
 doors:
   - ldm_floor_id: "3F"
