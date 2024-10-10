@@ -386,8 +386,18 @@ class LdmRmfAdapter(Node):
                     rl_context.get_destination_floor() == msg.destination_floor
                     and rl_context.get_occupant() != "rmf_api_server"
                 ):
+                    # When released and signed to fast need reset and run logic again
+                    if (
+                        rl_context.get_occupant() != ""
+                        and not rl_context._ldm_context._is_registered
+                    ):
+                        self.get_logger().warn(
+                            f"[{msg.lift_name}] seem lost register request, reset context and wait for next request!"
+                        )
+                        rl_context._ldm_context.reset()
                     # Because RMF sends same LiftRequest in 1 Hz, ldm-rmf-adapter has to neglect those redundant requests by checking whether LiftRequest.destination_floor changes.
                     return
+
                 rl_context.set_destination_floor(msg.destination_floor)
 
                 if not rl_context._ldm_context._is_registered:

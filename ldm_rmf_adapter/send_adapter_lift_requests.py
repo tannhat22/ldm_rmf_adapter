@@ -18,6 +18,7 @@ import sys
 import argparse
 
 import rclpy
+import rclpy.qos
 from rclpy.node import Node
 
 from rmf_lift_msgs.msg import LiftRequest
@@ -29,12 +30,12 @@ def main(argv=sys.argv):
     - lift_name: magni123
     - session_id: amr001
     - request_type: agv
-    - destination_floor: L1
+    - destination_floor: L2
     - door_state: closed
     """
 
     default_lift_name = "LIFT-001"
-    default_session_id = "amr001"
+    default_session_id = "amr_tayrua/amr001"
     default_request_type = "agv"
     default_destination_floor = "L2"
     default_door_state = "closed"
@@ -56,9 +57,16 @@ def main(argv=sys.argv):
     print("door_state: {}".format(args.door_state))
     print("topic_name: {}".format(args.topic_name))
 
+    transient_qos = rclpy.qos.QoSProfile(
+        history=rclpy.qos.HistoryPolicy.KEEP_LAST,
+        depth=100,
+        reliability=rclpy.qos.ReliabilityPolicy.RELIABLE,
+        durability=rclpy.qos.DurabilityPolicy.TRANSIENT_LOCAL,
+    )
+
     rclpy.init()
     node = rclpy.create_node("send_adapter_lift_requests_node")
-    pub = node.create_publisher(LiftRequest, args.topic_name, 10)
+    pub = node.create_publisher(LiftRequest, args.topic_name, transient_qos)
 
     msg = LiftRequest()
     msg.request_time = node.get_clock().now().to_msg()
