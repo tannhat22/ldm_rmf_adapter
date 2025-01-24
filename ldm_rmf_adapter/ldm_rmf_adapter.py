@@ -81,9 +81,7 @@ class RmfLiftContext(RmfContext):
     _ldm_context: ldm_context.LdmElevatorContext
     _rmf_floor_list: list[str]
 
-    def __init__(
-        self, ldm_context: ldm_context.LdmElevatorContext, logger=None
-    ) -> None:
+    def __init__(self, ldm_context: ldm_context.LdmElevatorContext, logger=None) -> None:
         super().__init__(ldm_context, logger)
 
         # convolve door direction into floor_name
@@ -97,9 +95,7 @@ class RmfLiftContext(RmfContext):
     def get_status(self) -> LiftState:
         lift_state = LiftState()
         lift_state.lift_name = self._ldm_context._elevator_id
-        lift_state.available_floors = [
-            x.floor_name for x in self._ldm_context._floor_list
-        ]
+        lift_state.available_floors = [x.floor_name for x in self._ldm_context._floor_list]
 
         # encode door direction to floor_name
         match self._ldm_context._current_door:
@@ -110,23 +106,9 @@ class RmfLiftContext(RmfContext):
             case _:
                 lift_state.door_state = LiftState.DOOR_MOVING
 
-        # if self._ldm_context._target_door == 2:
-        #     lift_state.destination_floor = (
-        #         f"{self._ldm_context._target_floor}_r"  # noqa
-        #     )
-        # else:
-        #     lift_state.destination_floor = self._ldm_context._target_floor
         lift_state.current_floor = self._ldm_context._current_floor
         lift_state.destination_floor = self._ldm_context._target_floor
         lift_state.motion_state = self._ldm_context._current_motion
-
-        # if (
-        #     lift_state.current_floor == lift_state.destination_floor
-        #     and lift_state.door_state == LiftState.DOOR_OPEN
-        # ):
-        #     lift_state.motion_state = LiftState.MOTION_STOPPED
-        # else:
-        #     lift_state.motion_state = LiftState.MOTION_UNKNOWN
 
         lift_state.available_modes = [
             LiftState.MODE_AGV,
@@ -295,14 +277,8 @@ class LdmRmfAdapter(Node):
 
     def robot_name_analyst(self, requester_id: str) -> None | list[str]:
         requester_analyst = requester_id.split("/")
-        if (
-            len(requester_analyst) != 2
-            or requester_analyst[0] == ""
-            or requester_analyst[1] == ""
-        ):
-            self.get_logger().error(
-                f"format of requester_id: '{requester_id}' incorrect!"
-            )
+        if len(requester_analyst) != 2 or requester_analyst[0] == "" or requester_analyst[1] == "":
+            self.get_logger().error(f"format of requester_id: '{requester_id}' incorrect!")
             return None
         return requester_analyst
 
@@ -338,10 +314,18 @@ class LdmRmfAdapter(Node):
             rl_context.set_occupant(msg.session_id)
 
         elif rl_context.get_occupant() != msg.session_id:
-            self.get_logger().warning(
-                f"[{msg.lift_name}] session_id mismatch: session is owned by {rl_context.get_occupant()} but requested from {msg.session_id}"
-            )
-            return
+            # Request from web server will priority handle!
+            if msg.session_id == "rmf_api_server":
+                self.get_logger().warn(
+                    f"[{msg.lift_name}] receive request from high priority [{msg.session_id}], reset context and handle this request first!"
+                )
+                rl_context.reset()
+                rl_context.set_occupant(msg.session_id)
+            else:
+                self.get_logger().warning(
+                    f"[{msg.lift_name}] session_id mismatch: session is owned by {rl_context.get_occupant()} but requested from {msg.session_id}"
+                )
+                return
 
         match msg.request_type:
             case LiftRequest.REQUEST_END_SESSION:
@@ -403,9 +387,7 @@ class LdmRmfAdapter(Node):
                 if not rl_context._ldm_context._is_registered:
                     res = self.do_registration(rl_context._ldm_context)
                     if not res or not rl_context._ldm_context._is_registered:
-                        self.get_logger().warning(
-                            f"[{msg.lift_name}] Registration failed: {res}"
-                        )
+                        self.get_logger().warning(f"[{msg.lift_name}] Registration failed: {res}")
                         return
                     self.get_logger().info(f"[{msg.lift_name}] Registration")
 
@@ -423,9 +405,7 @@ class LdmRmfAdapter(Node):
 
                     else:
                         origination = target_floor_list[0]
-                        self.get_logger().info(
-                            f"[{msg.lift_name}] 1st CallElevator: {origination}"
-                        )
+                        self.get_logger().info(f"[{msg.lift_name}] 1st CallElevator: {origination}")
 
                 else:
                     # 2nd CallElevator when the robot may be in the cage.
@@ -434,9 +414,7 @@ class LdmRmfAdapter(Node):
                     else:
                         destination = target_floor_list[0]
 
-                    self.get_logger().info(
-                        f"[{msg.lift_name}] 2nd CallElevator: {destination}"
-                    )
+                    self.get_logger().info(f"[{msg.lift_name}] 2nd CallElevator: {destination}")
 
                 # decode door direction from floor_name
                 destination_door = msg.door_state
@@ -499,9 +477,7 @@ class LdmRmfAdapter(Node):
                 if not rd_context._ldm_context._is_registered:
                     res = self.do_registration(rd_context._ldm_context)
                     if not res or not rd_context._ldm_context._is_registered:
-                        self.get_logger().warning(
-                            f"[{msg.door_name}] Registration failed: {res}"
-                        )
+                        self.get_logger().warning(f"[{msg.door_name}] Registration failed: {res}")
                         return
                     self.get_logger().info(f"[{msg.door_name}] Registration")
 
@@ -524,9 +500,7 @@ class LdmRmfAdapter(Node):
             if rl_context is not None:
                 rl_context._ldm_context._msg_callback(msg=l)
 
-    def do_registration(
-        self, context: ldm_context.LdmElevatorContext | ldm_context.LdmDoorContext
-    ):
+    def do_registration(self, context: ldm_context.LdmElevatorContext | ldm_context.LdmDoorContext):
         msg = RegisterRequest()
         match context.get_device_type():
             case ldm_context.DeviceType.ELEVATOR:
@@ -538,9 +512,7 @@ class LdmRmfAdapter(Node):
 
                 startTime = self.get_clock().now()
                 while True:
-                    durationTime = (self.get_clock().now() - startTime).nanoseconds * (
-                        10 ** (-9)
-                    )
+                    durationTime = (self.get_clock().now() - startTime).nanoseconds * (10 ** (-9))
                     if durationTime < self.timeout:
                         with context._context_lock:
                             if context._is_registered:
@@ -626,9 +598,7 @@ def main(args=None):
     # rclpy.shutdown()
 
     try:
-        ldm_rmf_lift_adapter.get_logger().info(
-            "Beginning client, shut down with CTRL-C"
-        )
+        ldm_rmf_lift_adapter.get_logger().info("Beginning client, shut down with CTRL-C")
         executor.spin()
     except KeyboardInterrupt:
         ldm_rmf_lift_adapter.get_logger().info("Keyboard interrupt, shutting down.\n")

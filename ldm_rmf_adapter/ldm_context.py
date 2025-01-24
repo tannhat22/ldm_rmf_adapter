@@ -54,16 +54,10 @@ class LdmFloorInfo:
         floor_name: str,
         has_front_door: bool = True,
         has_rear_door: bool = False,
-        # position_x: float = 0.0,
-        # position_y: float = 0.0,
-        # yaw: float = 0.0,
     ):
         self.floor_name = floor_name
         self.has_front_door = has_front_door
         self.has_rear_door = has_rear_door
-        # self.position_x = position_x
-        # self.position_y = position_y
-        # self.yaw = yaw
 
 
 class LdmContext(ABC):
@@ -153,20 +147,10 @@ class LdmElevatorContext(LdmContext):
         self._floor_list = []
 
         for f in floor_list_tmp:
-            if (
-                isinstance(f, list)
-                and len(f) == 3
-                and type(f[1]) == bool
-                and type(f[2]) == bool
-                # and type(f[3]) == ruamel.yaml.scalarfloat.ScalarFloat
-                # and type(f[4]) == ruamel.yaml.scalarfloat.ScalarFloat
-                # and type(f[5]) == ruamel.yaml.scalarfloat.ScalarFloat
-            ):
+            if isinstance(f, list) and len(f) == 3 and type(f[1]) == bool and type(f[2]) == bool:
                 self._floor_list.append(LdmFloorInfo(str(f[0]), f[1], f[2]))
             else:
-                self._logger.error(
-                    "[LDM] ldm_floor_list has format: [level, has_FD, has_BD]."
-                )
+                self._logger.error("[LDM] ldm_floor_list has format: [level, has_FD, has_BD].")
                 return False
 
         if len(self._floor_list) > 63:
