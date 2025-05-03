@@ -94,6 +94,7 @@ class RmfLiftContext(RmfContext):
 
     def get_status(self) -> LiftState:
         lift_state = LiftState()
+        lift_state.lift_time = self._ldm_context._last_updated_time
         lift_state.lift_name = self._ldm_context._elevator_id
         lift_state.available_floors = [x.floor_name for x in self._ldm_context._floor_list]
 
@@ -216,7 +217,7 @@ class LdmRmfAdapter(Node):
         )
 
         request_qos_profile = QoSProfile(
-            depth=0,
+            depth=1,
             reliability=ReliabilityPolicy.RELIABLE,
             durability=DurabilityPolicy.TRANSIENT_LOCAL,
         )
@@ -283,15 +284,20 @@ class LdmRmfAdapter(Node):
         return requester_analyst
 
     def _publish_rmf_states(self):
-        current_time = self.get_clock().now().to_msg()
-        # is_connected = self._ldm_client._mqtt_client.is_connected()
+        current_time = self.get_clock().now()
 
         for rl_context in self._lift_context_dict.values():
+
             lift_state = rl_context.get_status()
 
-            # if not is_connected:
-            #     lift_state.current_mode = LiftState.MODE_OFFLINE
-            lift_state.lift_time = current_time
+            is_connected = lift_state.lift_time is not None and self._ldm_client.is_connecting(
+                lift_state.lift_time.sec, current_time.seconds_nanoseconds()[0], 30.0
+            )
+
+            if not is_connected:
+                lift_state.current_mode = LiftState.MODE_OFFLINE
+
+            lift_state.lift_time = current_time.to_msg()
 
             self._lift_state_pub.publish(lift_state)
 
@@ -511,36 +517,13 @@ class LdmRmfAdapter(Node):
                 self._ldm_register_request_pub.publish(msg)
 
                 startTime = self.get_clock().now()
-                while True:
+                while rclpy.ok():
                     durationTime = (self.get_clock().now() - startTime).nanoseconds * (10 ** (-9))
                     if durationTime < self.timeout:
                         with context._context_lock:
                             if context._is_registered:
                                 return True
                         time.sleep(0.5)
-                        # is_success, lift_states = (
-                        #     rclpy.wait_for_message.wait_for_message(
-                        #         FleetLiftState,
-                        #         self,
-                        #         "/fleet_lift_state",
-                        #         time_to_wait=5.0,
-                        #     )
-                        # )
-                        # if is_success:
-                        #     lifts = lift_states.lifts
-                        #     for l in lifts:
-                        #         if l.lift_name == context._elevator_id:
-                        #             if (
-                        #                 l.register_state
-                        #                 == LDMLiftState.REGISTER_RELEASED
-                        #             ):
-                        #                 return True
-                        #             break
-                        # else:
-                        #     self.get_logger().error(
-                        #         "No receive messages from /fleet_lift_state topic!"
-                        #     )
-                        #     return False
                     else:
                         self.get_logger().error(f"Timeout wait for register request!")
                         return False

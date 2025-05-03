@@ -18,6 +18,7 @@ from typing import Any, Callable
 
 import ruamel.yaml.comments
 import ruamel.yaml.scalarfloat
+from builtin_interfaces.msg import Time
 from ldm_fleet_msgs.msg import LiftState as LDMLiftState
 
 
@@ -123,6 +124,7 @@ class LdmElevatorContext(LdmContext):
     _current_door: int
 
     _target_floor: str
+    _last_updated_time: Time | None
     # _target_door: int
 
     def __init__(self, logger=None) -> None:
@@ -162,6 +164,7 @@ class LdmElevatorContext(LdmContext):
 
         self._is_available = True
         self._is_registered = False
+        self._last_updated_time = None
         self._current_motion = 3
 
         self._current_floor = self._floor_list[0].floor_name
@@ -181,6 +184,7 @@ class LdmElevatorContext(LdmContext):
     def _msg_callback(self, msg: LDMLiftState) -> None:
         # result = payload.get("result", ResultCode.ERROR.value)
         current_mode = msg.current_mode
+        self._last_updated_time = msg.lift_time
         with self._context_lock:
             match current_mode:
                 case LDMLiftState.MODE_EMERGENCY:
@@ -302,6 +306,12 @@ class LdmClient:
                     self._context_dict.update({context._door_id: context})
 
         return True
+
+    def is_connecting(
+        self, last_updated_time: int, now_time: int, timeout_sec: float = 60.0
+    ) -> bool:
+        delta = now_time - last_updated_time
+        return delta <= timeout_sec
 
     def get_contexts(self) -> dict[str, LdmContext]:
         return self._context_dict
