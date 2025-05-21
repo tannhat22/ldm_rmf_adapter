@@ -90,6 +90,8 @@ class LdmContext(ABC):
         # self._response_event = threading.Event()
 
         self.reset_callback = None
+        self.last_request_id_accepted = ""
+        self.last_request = None
 
     @abstractmethod
     def initialize(self, config: dict) -> bool:
@@ -110,6 +112,14 @@ class LdmContext(ABC):
     @abstractmethod
     def _reset(self):
         pass
+
+    def is_expected_request_id(self) -> bool:
+        if (
+            self.last_request is not None
+            and self.last_request_id_accepted != self.last_request.request_id
+        ):
+            return False
+        return True
 
 
 class LdmElevatorContext(LdmContext):
@@ -184,6 +194,7 @@ class LdmElevatorContext(LdmContext):
     def _msg_callback(self, msg: LDMLiftState) -> None:
         # result = payload.get("result", ResultCode.ERROR.value)
         current_mode = msg.current_mode
+        self.last_request_id_accepted = msg.request_id
         self._last_updated_time = msg.lift_time
         with self._context_lock:
             match current_mode:

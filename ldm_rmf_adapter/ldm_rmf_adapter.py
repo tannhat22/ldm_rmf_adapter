@@ -291,7 +291,7 @@ class LdmRmfAdapter(Node):
             lift_state = rl_context.get_status()
 
             is_connected = lift_state.lift_time is not None and self._ldm_client.is_connecting(
-                lift_state.lift_time.sec, current_time.seconds_nanoseconds()[0], 30.0
+                lift_state.lift_time.sec, current_time.seconds_nanoseconds()[0], 60.0
             )
 
             if not is_connected:
@@ -300,6 +300,17 @@ class LdmRmfAdapter(Node):
             lift_state.lift_time = current_time.to_msg()
 
             self._lift_state_pub.publish(lift_state)
+
+            if not rl_context._ldm_context.is_expected_request_id():
+                print(
+                    f"Republishing request for {rl_context._ldm_context._elevator_id}: "
+                    f"{rl_context._ldm_context.last_request.request_id}, "
+                    f"because it is currently following {rl_context._ldm_context.last_request_id_accepted}"
+                )
+                if type(rl_context._ldm_context.last_request) is RegisterRequest:
+                    self._ldm_register_request_pub.publish(rl_context._ldm_context.last_request)
+                elif type(rl_context._ldm_context.last_request) is LDMLiftRequest:
+                    self._ldm_lift_request_pub.publish(rl_context._ldm_context.last_request)
 
         # for rd_context in self._door_context_dict.values():
         #     door_state = rd_context.get_status()
@@ -515,6 +526,7 @@ class LdmRmfAdapter(Node):
                 msg.register_mode = RegisterRequest.REGISTER_SIGNED
                 msg.request_id = str(self.next_cmd_id())
                 self._ldm_register_request_pub.publish(msg)
+                context.last_request = msg
 
                 startTime = self.get_clock().now()
                 while rclpy.ok():
@@ -534,6 +546,7 @@ class LdmRmfAdapter(Node):
                 msg.register_mode = RegisterRequest.REGISTER_SIGNED
                 msg.request_id = str(self.next_cmd_id())
                 self._ldm_register_request_pub.publish(msg)
+                context.last_request = msg
                 return True
 
     def do_release(self, context: ldm_context.LdmContext):
@@ -548,6 +561,7 @@ class LdmRmfAdapter(Node):
         msg.register_mode = RegisterRequest.REGISTER_RELEASED
         msg.request_id = str(self.next_cmd_id())
         self._ldm_register_request_pub.publish(msg)
+        context.last_request = msg
 
     def do_call_elevator(
         self,
@@ -568,6 +582,7 @@ class LdmRmfAdapter(Node):
         msg.door_state = destination_door
         msg.request_id = str(self.next_cmd_id())
         self._ldm_lift_request_pub.publish(msg)
+        context.last_request = msg
         return True
 
 
